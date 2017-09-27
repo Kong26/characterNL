@@ -69,7 +69,7 @@ def main():
     
     
     optimizer = optim.SGD(model.parameters(),lr=config.lr)
-    loss_function = nn.NLLLoss()
+    loss_function = nn.CrossEntropyLoss()
     
     if 'tr' in config.mode:
         for epoch in range(config.tr_epoch):
@@ -100,7 +100,7 @@ def main():
                     
                     if ix%10 == 0:
                         nll = loss.data
-                        ppl = torch.exp(nll/(config.time_step-1))
+                        ppl = torch.exp(nll*config.batch_size/(config.time_step-1))
                         print('loss of training step %i : %f'%(ix,ppl[0]))
                     
                     loss.backward()
@@ -110,6 +110,6 @@ def main():
                     optimizer.step()
                     print("after optimizer step")
                     show_gpu()    
-
+        torch.save(model.state_dict(),'/home/raehyun/github/characterNL/model/first_model')
 if __name__ == "__main__":
     main()
