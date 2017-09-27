@@ -90,11 +90,12 @@ def wordToindex(word_dict,lines):
 
 def indexTovector(lines,embedding,time_step):
     batch_size = len(lines) 
+    num_element = len(lines[0])
     vector_list = []
-    batch_tensor = torch.zeros(batch_size,time_step,15,19)
+    batch_tensor = torch.zeros(batch_size,num_element,15,19)
 
     for ix_l,line in enumerate(lines): 
-        sent_tensor = torch.zeros(time_step,15,19) 
+        sent_tensor = torch.zeros(num_element,15,19) 
         for ix_w,word in enumerate(line): 
             word_vector = torch.zeros(15,19)
             for i,ix in enumerate(word):
@@ -126,21 +127,32 @@ def make_sent_vector(word_batch, embedding, batch_size):
     return lines_tensor
 
 
-def create_batch(word_list,start,batch_size):
+def create_batch(word_list,batch_size):
+    # create list of word list to use as a minibatch
     word_batch = []
-    for ix in range(start,start+batch_size):
-        word_batch.append(word_list[start+ix:start+35+ix])
+    num_element = len(word_list)//batch_size
+    for ix in range(batch_size):
+        word_batch.append(word_list[ix*num_element:(ix*num_element)+num_element])
     return word_batch
 
-def get_next_batch(word_list, char_dict, word_dict, embedding, start, batch_size, time_step):
-    # word_batch : List of batches - batch size * # of words
-    word_batch = create_batch(word_list, start, batch_size)
+def get_target(word_batch,word_dict):
+    for i in range(len(word_batch)):
+        line = word_batch[i]
+        if i ==0 :
+            target = torch.LongTensor([word_dict[word] for word in line]).unsqueeze(0)
+        else:
+            idx_line = torch.LongTensor([word_dict[word] for word in line]).unsqueeze(0)
+            target = torch.cat((target,idx_line))
+    return target
+
+def get_batch(word_list, char_dict, word_dict, embedding, batch_size, time_step):
+    # word_batch : List of batches -- batch size * (total word length)//batch_size
+    word_batch = create_batch(word_list, batch_size)
     indexed_batch = charToindex(char_dict,word_batch)
+    input_words = indexTovector(indexed_batch,embedding,time_step).unsqueeze(1)
     
-    input_words = indexTovector(indexed_batch,embedding,time_step)[:,:time_step-1,:,:] 
-    target_words = torch.LongTensor([word_dict[line[-1]] for line in word_batch])
-    
-    return input_words, target_words
+    target_words = get_target(word_batch,word_dict)
+    return input_words,target_words
 
 
 

@@ -15,12 +15,15 @@ class Config():
         self.mode = 'train'
         self.data_dir = '/home/raehyun/github/characterNL/data'
         self.dict_name = ['tr_chdict.pickle','tr_wdict.pickle'] 
+        self.split_num = 10
         
+
         self.char_dim = 15
         self.batch_size = 20
         self.vocab_size = 0
-        self.time_step = 36
-        
+        self.time_step = 35
+        self.lstm_hidden = 300
+
         self.lr = 0.01
         self.tr_epoch = 10
 
@@ -53,50 +56,60 @@ def main():
     embedding = nn.Embedding(len(char_dict),config.char_dim) 
     # Put all words in one list 
     word_list,_ = wordToindex(word_dict,lines)
-    
+    batch_length = len(word_list)//config.split_num
+
     print("before model")
     show_gpu()    
 
     model = CharNLM(config)
+    print(model)
     model.cuda()
     print("after model")
     show_gpu()    
-
+    
+    
     optimizer = optim.SGD(model.parameters(),lr=config.lr)
-    loss_function = nn.CrossEntropyLoss()
+    loss_function = nn.NLLLoss()
     
     if 'tr' in config.mode:
         for epoch in range(config.tr_epoch):
-            for ix in range(len(word_list)-config.batch_size): 
-                start = ix * config.batch_size
-                input, target = get_next_batch(word_list,char_dict,word_dict,embedding,start,config.batch_size,config.time_step) 
+            for split_ix in range(config.split_num):
+                batch_line = word_list[split_ix*batch_length:split_ix*batch_length+batch_length]
+
+                input,target = get_batch(batch_line,char_dict,word_dict,embedding,config.batch_size,config.time_step)
                 
-                input, target = Variable(input.contiguous().view([config.batch_size,1,config.time_step-1,15,19]),requires_grad=False).cuda(), \
-                                                                                    Variable(target,requires_grad=False).cuda()
-                print("after input")
-                show_gpu()    
-                
-                output = model(input)
-                optimizer.zero_grad()
-                print("after model call")
-                show_gpu()    
-                
-                loss = loss_function(output,target)
-                #loss = torch.exp((loss_function(output,target)*config.batch_size)/(config.time_step-1))
-                print("after get loss")
-                show_gpu() 
-                
-                #if ix%10 == 0:
-                 #   print('loss of training step %i : %f'%(ix,loss.data[0]))
-                
-                loss.backward()
-                print("after backward")
-                show_gpu() 
-                
-                optimizer.step()
-                print("after optimizer step")
-                show_gpu()    
- 
+                for ix in range(input.shape[2]//config.time_step):
+                    optimizer.zero_grad()
+                    
+                    m_input = Variable(input[:,:,ix*config.time_step:ix*config.time_step+config.time_step,:,:],requires_grad=False).cuda()
+                    m_target = Variable(target[:,ix*config.time_step+1:ix*config.time_step+config.time_step],requires_grad=False).contiguous().view((config.batch_size*(config.time_step-1))).cuda()
+                    
+                    print(m_input.data.shape,m_target.data.shape)
+                    
+                    print("after input")
+                    show_gpu()    
+                    
+                    output = model(m_input).view((config.batch_size*(config.time_step-1),-1))
+                    print("after model call")
+                    show_gpu()    
+                    
+                    loss = loss_function(output,m_target)
+                    #loss = torch.exp((loss_function(output,target)*config.batch_size)/(config.time_step-1))
+                    print("after get loss")
+                    show_gpu() 
+                    
+                    if ix%10 == 0:
+                        nll = loss.data
+                        ppl = torch.exp(nll/(config.time_step-1))
+                        print('loss of training step %i : %f'%(ix,ppl[0]))
+                    
+                    loss.backward()
+                    print("after backward")
+                    show_gpu() 
+                    
+                    optimizer.step()
+                    print("after optimizer step")
+                    show_gpu()    
 
 if __name__ == "__main__":
     main()

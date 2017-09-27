@@ -13,6 +13,8 @@ class CharNLM(nn.Module):
         self.vocab_size = config.vocab_size
         self.char_dim = config.char_dim
         self.batch_size = config.batch_size
+        self.lstm_hidden = config.lstm_hidden
+        self.time_step = config.time_step
 
         self.conv1 = nn.Conv3d(1,25,(1,self.char_dim,1))
         self.conv2 = nn.Conv3d(1,25*2,(1,self.char_dim,2))
@@ -24,7 +26,7 @@ class CharNLM(nn.Module):
         self.high_t = nn.Linear(525,525) 
         self.high_h = nn.Linear(525,525)
         
-        self.lstm1 = nn.LSTM(525,300,batch_first=True)
+        self.lstm1 = nn.LSTM(525,self.lstm_hidden,batch_first=True)
         self.lstm2 = nn.LSTM(300,self.vocab_size,batch_first=True)
         self.softmax = nn.LogSoftmax()
 
@@ -37,13 +39,29 @@ class CharNLM(nn.Module):
         x6 = torch.max(F.tanh(self.conv6(x)),4)[0]
         
         y = torch.squeeze(torch.cat((x1,x2,x3,x4,x5,x6),1)).transpose(1,2)
+        print('CNN output shape : ',y.data.shape)
         t = F.relu(self.high_t(y))
         z = torch.mul(t,F.relu(self.high_h(y))) + torch.mul((1-t),y)
+        print('lstm input shape',z.data.shape) 
+        h_0 = Variable(torch.zeros([1,self.batch_size,self.lstm_hidden])).cuda()
+        c_0 = Variable(torch.zeros([1,self.batch_size,self.lstm_hidden])).cuda()
         
-        lstm1_out, (h_1, c_1) = self.lstm1(z)
+        lstm1_out, (h_1, c_1) = self.lstm1(z,(h_0,c_0))
+        print('lstm output shape',lstm1_out.data.shape,(h_1.data.shape),(c_1.data.shape))
         lstm2_out,  (h_2, c_2) = self.lstm2(lstm1_out)
-        lstm2_out = lstm2_out[:,-1,:] 
+        print('lstm2 output shape',lstm2_out.data.shape,(h_2.data.shape),(c_2.data.shape))
+        lstm2_out = lstm2_out[:,:self.time_step-1,:]
+        print('lstm cell final output shape:',lstm2_out.data.shape)
         ####################check softmax function (by row) 
         output = self.softmax(lstm2_out)
-        
+       
+
         return output
+
+
+
+
+
+
+
+
