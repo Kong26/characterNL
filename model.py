@@ -9,59 +9,54 @@ class CharNLM(nn.Module):
     def __init__(self,config):
         super(CharNLM,self).__init__()
 
-        self.config = config
-        self.vocab_size = config.vocab_size
         self.char_dim = config.char_dim
         self.batch_size = config.batch_size
-        self.lstm_hidden = config.lstm_hidden
         self.time_step = config.time_step
-
-        self.conv1 = nn.Conv3d(1,25,(1,self.char_dim,1))
-        self.conv2 = nn.Conv3d(1,25*2,(1,self.char_dim,2))
-        self.conv3 = nn.Conv3d(1,25*3,(1,self.char_dim,3))
-        self.conv4 = nn.Conv3d(1,25*4,(1,self.char_dim,4))
-        self.conv5 = nn.Conv3d(1,25*5,(1,self.char_dim,5))
-        self.conv6 = nn.Conv3d(1,25*6,(1,self.char_dim,6))
-
+        
+        self.embedding = nn.Embedding(51,config.char_dim)
+        
+        self.char_cnn_fn = [1,2,3,4,5,6]
+        self.char_conv = nn.ModuleList([nn.Conv2d(1,25*i,(self.char_dim,i))
+                                        for i in self.char_cnn_fn])
+        
         self.high_t = nn.Linear(525,525) 
         self.high_h = nn.Linear(525,525)
         
-        self.lstm1 = nn.LSTM(525,self.lstm_hidden,batch_first=True)
-        self.lstm2 = nn.LSTM(300,self.vocab_size,batch_first=True)
-        self.softmax = nn.LogSoftmax()
+        self.lstm = nn.LSTM(525,config.lstm_hidden,config.num_layer,
+                                dropout=config.rnn_dropout,batch_first=True)
+        self.fc = nn.Linear(300,config.vocab_size)
 
-    def forward(self,x):
-        x1 = torch.max(F.tanh(self.conv1(x)),4)[0]
-        x2 = torch.max(F.tanh(self.conv2(x)),4)[0]
-        x3 = torch.max(F.tanh(self.conv3(x)),4)[0]
-        x4 = torch.max(F.tanh(self.conv4(x)),4)[0]
-        x5 = torch.max(F.tanh(self.conv5(x)),4)[0]
-        x6 = torch.max(F.tanh(self.conv6(x)),4)[0]
+        self.softmax = nn.Softmax()
+    
+    def char_conv_layer(self, inputs):
+        conv_result = []
+        for i, conv in enumerate(self.char_conv):
+            out = torch.max(conv(inputs),3)[0].squeeze()
+            conv_result.append(out)
+        result = torch.cat(conv_result,1)
         
-        y = torch.squeeze(torch.cat((x1,x2,x3,x4,x5,x6),1)).transpose(1,2)
-        print('CNN output shape : ',y.data.shape)
-        t = F.relu(self.high_t(y))
-        z = torch.mul(t,F.relu(self.high_h(y))) + torch.mul((1-t),y)
-        print('lstm input shape',z.data.shape) 
-        h_0 = Variable(torch.zeros([1,self.batch_size,self.lstm_hidden])).cuda()
-        c_0 = Variable(torch.zeros([1,self.batch_size,self.lstm_hidden])).cuda()
+        return result
+    
+    def highway_layer(self,inputs,batch_size,time_step):
+        t = F.relu(self.high_t(inputs))
+        z = torch.mul(t,F.relu(self.high_h(inputs))) + torch.mul((1-t),inputs)
+        z = z.view(batch_size,time_step,-1) 
+        return z
+
+    def lstm_layer(self,inputs,hiddens):
+         out,(h,c) = self.lstm(inputs,hiddens)
+         hidden = (h.data,c.data)
+         return out,hidden
+    
+    def fc_layer(self,inputs):
+        return self.fc(inputs)
+
+    def forward(self,input,hidden):
         
-        lstm1_out, (h_1, c_1) = self.lstm1(z,(h_0,c_0))
-        print('lstm output shape',lstm1_out.data.shape,(h_1.data.shape),(c_1.data.shape))
-        lstm2_out,  (h_2, c_2) = self.lstm2(lstm1_out)
-        print('lstm2 output shape',lstm2_out.data.shape,(h_2.data.shape),(c_2.data.shape))
-        lstm2_out = lstm2_out[:,:self.time_step-1,:]
-        print('lstm cell final output shape:',lstm2_out.data.shape)
-        ####################check softmax function (by row) 
-        output = self.softmax(lstm2_out)
-       
+        char_conv = self.char_conv_layer(input)
+        z = self.highway_layer(char_conv,self.batch_size,self.time_step) 
+        lstm_out,hidden = self.lstm_layer(z,hidden) 
+        out = self.fc_layer(lstm_out)
 
-        return output
-
-
-
-
-
-
-
+        return out,hidden 
 
